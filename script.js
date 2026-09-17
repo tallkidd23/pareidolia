@@ -1,101 +1,72 @@
-// Configure your image folder and extensions here
-const IMAGE_FOLDER = 'images/';
-const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+const OWNER = 'tallkidd23';
+const REPO = 'pareidolia';
+const BRANCH = 'main';
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
+const SLIDE_INTERVAL_MS = 6000;
+const REFRESH_LIST_MS = 5 * 60 * 1000;
 
-const stage = document.getElementById('stage');
+let images = [];
+let idx = 0;
+let slideTimer = null;
+
 const photoEl = document.getElementById('photo');
+const captionEl = document.getElementById('caption');
 
-let imageUrls = [];
-let currentIndex = 0;
-let loadedImages = [];
-
-// Build list of image URLs
-async function loadImageList() {
-  // If directory listing is not available, uncomment and use this manual list:
-  // const filenames = ['01.jpg', '02.jpg', '03.jpg'];
-  // imageUrls = filenames.map(name => IMAGE_FOLDER + name);
-  // loadedImages = new Array(imageUrls.length).fill(null);
-  // return;
-
+async function loadImages() {
   try {
-    const res = await fetch(IMAGE_FOLDER);
-    const text = await res.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(text, 'text/html');
-    const links = Array.from(doc.querySelectorAll('a'));
-
-    const filenames = links
-      .map(a => decodeURIComponent(a.getAttribute('href') || ''))
-      .filter(href => {
-        if (!href) return false;
-        if (href.endsWith('/') || href.includes('..')) return false;
-        const ext = href.split('.').pop().toLowerCase();
-        return IMAGE_EXTENSIONS.includes(ext);
-      })
+    const res = await fetch(
+      `https://api.github.com/repos/${OWNER}/${REPO}/contents/images?ref=${BRANCH}`,
+      { cache: 'no-store' }
+    );
+    if (!res.ok) throw new Error('GitHub API error ' + res.status);
+    const files = await res.json();
+    const newImages = files
+      .filter((f) => f.type === 'file' && IMAGE_EXT.test(f.name))
+      .map((f) => f.name)
       .sort();
 
-    imageUrls = filenames.map(name => IMAGE_FOLDER + name);
-    loadedImages = new Array(imageUrls.length).fill(null);
-  } catch {
-    // Fallback: manual list if auto-discovery fails
-    const filenames = [
-      '01.jpg',
-      '02.jpg',
-      '03.jpg'
-    ];
-    imageUrls = filenames.map(name => IMAGE_FOLDER + name);
-    loadedImages = new Array(imageUrls.length).fill(null);
-  }
-}
+    const changed = JSON.stringify(newImages) !== JSON.stringify(images);
+    images = newImages;
 
-// Preload an image by index
-function preloadImage(index) {
-  if (!imageUrls[index] || loadedImages[index]) return;
-  const img = new Image();
-  img.src = imageUrls[index];
-  img.onload = () => {
-    loadedImages[index] = img;
-    if (index === currentIndex) {
-      showImage(index);
+    if (images.length === 0) {
+      captionEl.textContent = 'No photos yet \u2014 upload one to the images folder!';
+      photoEl.removeAttribute('src');
+      return;
     }
-  };
-}
-
-function showImage(index) {
-  const img = loadedImages[index];
-  if (!img) return;
-  photoEl.src = img.src;
-}
-
-function nextImage() {
-  if (imageUrls.length === 0) return;
-  currentIndex = (currentIndex + 1) % imageUrls.length;
-  preloadImage(currentIndex);
-  showImage(currentIndex);
-}
-
-function init() {
-  if (imageUrls.length === 0) return;
-  // preload first few images
-  for (let i = 0; i < Math.min(3, imageUrls.length); i++) {
-    preloadImage(i);
+    captionEl.textContent = '';
+    if (changed) {
+      idx = Math.min(idx, images.length - 1);
+      showImage(idx);
+    }
+  } catch (err) {
+    captionEl.textContent = 'Could not load photos right now.';
+    console.error(err);
   }
-  showImage(currentIndex);
 }
 
-// Advance on click/tap
-stage.addEventListener('click', (e) => {
-  e.preventDefault();
-  nextImage();
-});
+function showImage(i) {
+  if (images.length === 0) return;
+  photoEl.src = `images/${images[i]}`;
+  photoEl.alt = images[i];
+}
 
-// Also advance on arrow keys / space for desktop
-window.addEventListener('keydown', (e) => {
-  if (['ArrowRight', 'ArrowLeft', 'Space', 'Enter'].includes(e.code)) {
-    e.preventDefault();
-    nextImage();
-  }
-});
+function next() {
+  if (images.length === 0) return;
+  idx = (idx + 1) % images.length;
+  showImage(idx);
+}
 
-// Start
-loadImageList().then(init);
+function startSlideshow() {
+  if (slideTimer) clearInterval(slideTimer);
+  slideTimer = setInterval(next, SLIDE_INTERVAL_MS);
+}
+
+async function init() {
+  await loadImages();
+  showImage(idx);
+  startSlideshow();
+  setInterval(loadImages, REFRESH_LIST_MS);
+}
+
+photoEl.addEventListener('click', next);
+window.addEventListener('load', init);
